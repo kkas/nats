@@ -1,5 +1,9 @@
 module NATSD #:nodoc: all
 
+  # 新しいクラスの構造体を作成。
+  # 第一引数がシンボルのため、無名クラスとして作成される。以下の例だと、Subscriberと取り出した時点で
+  # クラス名がSubscriberとなる。
+  # {http://doc.ruby-lang.org/ja/1.9.3/class/Struct.html}
   # Subscriber
   Subscriber = Struct.new(:conn, :subject, :sid, :qgroup, :num_responses, :max_responses)
 
@@ -21,28 +25,49 @@ module NATSD #:nodoc: all
       def port; @options[:port] end
       def pid_file; @options[:pid_file] end
 
+      # nats-server起動時の引数をオプションとして設定する。
+      # コンフィグファイルを読み込んでオプション設定する。
       def process_options(argv=[])
         @options = {}
 
+        # まずはコマンドラインで指定された設定を読み込むようにする。
+        # 設定ファイルの読み込み前にコマンドラインの設定値を読み込むことで、
+        # コマンドラインの設定値を優先的に使用するようにしている。
         # Allow command line to override config file, so do them first.
         parser.parse!(argv)
+        # #read_config_fileはnats/server/options.rbに定義あり。
         read_config_file if @options[:config_file]
+        # #finalize_optionsはnats/server/options.rbに定義あり。
+        # コンフィグファイルに定義されているものはそれを使用し、指定されていないものは
+        # デフォルト値を使用するように設定する。
         finalize_options
       rescue OptionParser::InvalidOption => e
         log_error "Error parsing options: #{e}"
         exit(1)
       end
 
+      # nats-serverが起動する前(EM.runの前)に一番初めに呼び出されるメソッド。
+      # nats-server起動時の引数を@optionsに設定する。
+      #
+      # Sublistを初期化する。
+      #
+      # configでdeamonized定義有りの場合、deamonモードとして起動するように設定する。
       def setup(argv)
         process_options(argv)
 
+        # #fast_uuidはnats/server/util.rbで定義あり。
+        # TODO: randomでなにか作成している。uuidとして使う値か？
         @id, @cid = fast_uuid, 1
+        # server/sublistで定義されている。
         @sublist = Sublist.new
 
         @num_connections = 0
         @in_msgs = @out_msgs = 0
         @in_bytes = @out_bytes = 0
 
+        # TODO: このあたりの変数に見えるものはすべて本クラスのクラスメソッド。
+        # #hostは@options[:addr]を取得
+        # #portは@options[:port]を取得
         @info = {
           :server_id => Server.id,
           :host => host,
