@@ -110,6 +110,8 @@ module NATSD
         exit
       end
 
+      # log関連の設定を行う。
+      # オプションに:log_fileの設定がある場合、それを使用する
       def setup_logs
         return unless @options[:log_file]
         $stdout.reopen(@options[:log_file], 'a')

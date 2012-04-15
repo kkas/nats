@@ -56,6 +56,9 @@ module NATSD #:nodoc: all
         process_options(argv)
 
         # #fast_uuidはnats/server/util.rbで定義あり。
+        # lib/nats/server/connection.rbで、コネクションが作成される度にServer#cidで
+        # 1ずつインクリメントした値を取得して素のコネクションの@cidにセットする。
+        # 
         # TODO: randomでなにか作成している。uuidとして使う値か？
         @id, @cid = fast_uuid, 1
         # server/sublistで定義されている。
@@ -65,7 +68,7 @@ module NATSD #:nodoc: all
         @in_msgs = @out_msgs = 0
         @in_bytes = @out_bytes = 0
 
-        # TODO: このあたりの変数に見えるものはすべて本クラスのクラスメソッド。
+        # TODO: このあたりの変数に見えるものはすべてこのクラスのクラスメソッド。
         # #hostは@options[:addr]を取得
         # #portは@options[:port]を取得
         @info = {
@@ -99,6 +102,7 @@ module NATSD #:nodoc: all
           FileUtils.rm_f("#{Dir.tmpdir}/#{APP_NAME}.pid")
         end
 
+        # lib/nats/server/options.rbに定義あり。
         setup_logs
 
         # Setup optimized select versions
@@ -109,6 +113,7 @@ module NATSD #:nodoc: all
         File.open(@options[:pid_file], 'w') { |f| f.puts "#{Process.pid}" } if @options[:pid_file]
       end
 
+      # 
       def subscribe(sub)
         @sublist.insert(sub.subject, sub)
       end

@@ -1,5 +1,21 @@
-#--
+# SublistNode:
+#    :leaf_nodes :
+#       ・subscriberを保持。
+#    :next_level :
+#       ・次のLevelを指すポインタ
 #
+# SublistLevel:
+#    :nodes :
+#       ・tokenをキーにしたNodeを保持している。
+#       ・tokenが複数ある場合は、Nodeに新しいLevelを追加する。
+#    :pwc :
+#       ・PWCは'*'を示す。PWCをsubjectとしてsubscribeオペレーションを受信した場合、
+#         pwcに新しいNodeを追加する。
+#    :fwc :
+#       ・FWCは'*'を示す。FWCをsubjectとしてsubscribeオペレーションを受信した場合、
+#         fwcに新しいNodeを追加する。
+#--
+# Tokenとは、subjectを「.」で区切った一つ一つをtokenと呼ぶ。
 # Sublist implementation for a publish-subscribe system.
 # This container class holds subscriptions and matches
 # candidate subjects to those subscriptions.
@@ -50,6 +66,9 @@ class Sublist #:nodoc:
     @cache.delete(keys[rand(keys.size)])
   end
 
+  # subscribeのオペレーションを受信した際に呼び出される。
+  #   subject subscriberのsubject
+  #   subscriber Subscriber構造体のインスタンス。
   # Insert a subscriber into the sublist for the given subject.
   def insert(subject, subscriber)
     # TODO - validate subject as correct.
@@ -57,6 +76,8 @@ class Sublist #:nodoc:
     for token in tokens
       # This is slightly slower than direct if statements, but looks cleaner.
       case token
+        #PWCは'*'を示す。
+        #FWCは'>'を示す。
         when FWC then node = (level.fwc || (level.fwc = SublistNode.new([])))
         when PWC then node = (level.pwc || (level.pwc = SublistNode.new([])))
         else node  = ((level.nodes[token]) || (level.nodes[token] = SublistNode.new([])))

@@ -1,3 +1,29 @@
+# @client:
+#    リモートサーバへのコネクションを保持。
+# @ssid:
+#    インスタンスがinitializeされたときに１がセットされる。
+# sid Object:
+#    ・subjectIDを保持。#subscribeするたびに１ずつインクリメントされるインスタンス変数。
+#    ・TODO:#unsubscribe呼び出し時に使用するためのものらしい。
+#    ・@subs[sid]とかで使われてるが。。。
+# @subs Hash:
+#    ・subject(sub)を保持しているHash。キーはsidでsubを取得。
+# sub Hash :
+#    ・subject、callback、受信回数などを保持しているHash。
+#    ・@subsで保持されており、キーはsid。
+#    ・保持している情報は以下のとおり。
+#        :subject :
+#            subscribeするsubject
+#        :callback :
+#            subscribeしているメッセージを受信した際に呼び出されるコールバック
+#        :received :
+#            subscribeしているメッセージの受信回数
+#        :queue :
+#            キューグループを作成する際のidentifierとして使用される。
+#        :max :
+#            ・subscribeするsubjectにおけるメッセージ最大受信回数。
+#            ・この受信回数が設定されている場合に、最大回数に達すると自動的にunsubscribe
+#              される。
 require 'uri'
 
 ep = File.expand_path(File.dirname(__FILE__))
@@ -112,7 +138,15 @@ module NATS
       @err_cb = proc { |e| raise e } unless err_cb
       check_autostart(@uri) if opts[:autostart] == true
 
+      # リモートサーバへ接続する。戻り値はコネクションクラスのインスタンス。
+      # 第一引数のホスト(ホスト名、または、IPアドレス)にTCPコネクションを作成する。
+      # 第二引数で接続先ポートを指定する。
+      # 第三引数でハンドラモジュールを登録。このハンドラモジュールは必ず作成して
+      #   使用する必要がある。作成したコネクションに対するイベントループによって
+      #   呼び出されるcallbackを含んでいる必要がある。
+      # {http://eventmachine.rubyforge.org/EventMachine.html#M000473}
       client = EM.connect(@uri.host, @uri.port, self, opts)
+      # clientコネクションが作成された後に呼び出されるcallbackを定義する。
       client.on_connect(&blk) if blk
       return client
     end
@@ -313,6 +347,7 @@ module NATS
     queue_server_rt(&blk) if blk
   end
 
+  # インスタンスメソッドの#subscribe。
   # Subscribe to a subject with optional wildcards.
   # Messages will be delivered to the supplied callback.
   # Callback can take any number of the supplied arguments as defined by the list: msg, reply, sub.

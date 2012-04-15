@@ -1,3 +1,56 @@
+# @cid:
+#    ・クライアントコネクションが作成される毎に割り当てられる1から始まる番号。
+#    ・作成される度にServer#cidで１ずつインクリメントされた値をセット。
+# @subscriptions Hash:
+#    ・キーはsidでSubscriberインスタンスを保持。
+# @in_msgs:
+#
+# @out_msgs:
+#
+# @in_bytes:
+#
+# @out_bytes:
+#
+# @writev Array:
+#    ・一時的に送信データを格納する変数。
+#    ・#queue_dataで作成され、#flush_dataでクリアされる(nilをセット)
+# @writev_size:
+#    @writevに格納されているデータのバイトサイズを格納。
+# @parse_state:
+#
+# @ssl_pending:
+#
+# @auth_pending:
+#
+# @ping_timer:
+#    ・ping_intervalで設定された値をEM.add_periodic_timerで設定し、@ping_timerに格納。
+#      #unbindでタイマーをキャンセルするために変数に格納している。
+#    ・ping_intervalはオプションで設定可能。デフォルトは120秒。
+#        ./lib/nats/server/const.rb:  PING_RESPONSE = "PING#{CR_LF}".freeze
+#    ・lib/nats/server/options.rbで設定あり。デフォルト値は、lib/nats/server/const.rb
+#
+# @pings_outstanding:
+#    ・コネクション作成時に０で初期化される。
+#    ・クライアントに定期的にPINGメッセージを送信するたびに１ずつインクリメントされる。
+#      PONGを受信したら１ずつデクリメントする。
+#    ・この値がServer.ping_maxを越えた場合、クライアントコネクションが削除される。
+#      コネクション削除時、クライアント側にUNRESPONSIVEの通知あり。
+#            ./lib/nats/server/const.rb:  UNRESPONSIVE        = "-ERR 'Unresponsive client detected, connection dropped'#{CR_LF}".freeze
+#
+# INFOメッセージ:
+#    ・"INFO #{Server.info_string}#{CR_LF}"
+#        Server#info_stringは@infoをJSONに変換するメソッド
+#        info_stringには以下の情報が含まれる。
+#               @info = {
+#          :server_id => Server.id,
+#          :host => host,
+#          :port => port,
+#          :version => VERSION,
+#          :auth_required => auth_required?,
+#          :ssl_required => ssl_required?,
+#          :max_payload => @max_payload
+#        }
+
 module NATSD #:nodoc: all
 
   module Connection #:nodoc: all
@@ -6,12 +59,23 @@ module NATSD #:nodoc: all
     attr_reader :cid, :closing, :last_activity, :writev_size
     alias :closing? :closing
 
+    # EventMachine::Connection#send_dataを呼び出す。
+    # {http://eventmachine.rubyforge.org/EventMachine/Connection.html#M000287}
     def flush_data
       return if @writev.nil? || closing?
       send_data(@writev.join)
       @writev, @writev_size = nil, 0
     end
 
+    # 引数のデータを@writevに格納する。
+    # @writev_size は@writevに溜まっているデータのバイトサイズを格納。
+    # @writev_sizeがMAX_WRITEV_SIZEに達している場合はすぐに#flush_dataで
+    # データを送信する。それ以外は、EM#next_tickをセットしてそこで
+    # #flush_dataを呼び出してデータ送信する。
+    #
+    # @writevはここで作成する。作成された@writevは格納されたデータ送信後
+    # (#flush_dataで送信)にnilにセットされる。また、それと同じタイミングで@writev_sizeも
+    # 0にセットされる。
     def queue_data(data)
       EM.next_tick { flush_data } if @writev.nil?
       (@writev ||= []) << data
@@ -19,6 +83,10 @@ module NATSD #:nodoc: all
       flush_data if @writev_size > MAX_WRITEV_SIZE
     end
 
+    # TODO:EM#get_peernameはSocket#unpack_sockaddr_inと一緒に使えばOK？
+    # Socket#unpack_sockaddr_inは戻り値としてportとipアドレスの配列を返す。
+    # {http://eventmachine.rubyforge.org/EventMachine/Connection.html#M000300}
+    # {http://doc.ruby-lang.org/ja/1.9.2/library/socket.html}
     def client_info
       @client_info ||= (get_peername.nil? ? 'N/A' : Socket.unpack_sockaddr_in(get_peername))
     end
@@ -26,6 +94,9 @@ module NATSD #:nodoc: all
     def info
       {
         :cid => cid,
+        # client_infoには、Socket#unpack_sockaddr_inの戻り値のportとipアドレスの配列が
+        # 格納されている。
+        # #client_info参照。
         :ip => client_info[1],
         :port => client_info[0],
         :subscriptions => @subscriptions.size,
@@ -44,12 +115,29 @@ module NATSD #:nodoc: all
       true
     end
 
+    # Clientからのコネクションが作成された後に呼び出されるメソッド。
+    # コネクションインスタンスの初期化を行う。
+    # 各種変数の初期化、ping_intervalの設定など行う。
+    # client側にINFOメッセージをJSON形式で送信する。
+    #    INFO (
+    #
+    # TODO:最大コネクション数を越えている場合は、trueを返す。
+    # それ以外は明示的にリターンしていないが、サーバのコネクション数をリターンしている。
+    # このメソッドはEMのevent-loopで呼び出される。
+    #
+    # {http://eventmachine.rubyforge.org/EventMachine/Connection.html#M000268}
     def post_init
+      # Server.cidではクライアントからのコネクションが作成される度にデフォルトの１から
+      # １ずつインクリメントされた値が返ってくる。
+      # TODO: ２からはじまる？
       @cid = Server.cid
       @subscriptions = {}
       @verbose = @pedantic = true # suppressed by most clients, but allows friendly telnet
       @in_msgs = @out_msgs = @in_bytes = @out_bytes = 0
+      # @writev_size は@writevに溜まっているデータのバイトサイズを格納。
       @writev_size = 0
+      # AWAITING_CONTROL_LINEは /lib/nats/server/const.rbで定義されている。
+      # メッセージにこれが含まれている場合、次のデータはペイロードとなる。
       @parse_state = AWAITING_CONTROL_LINE
       send_info
       debug "Client connection created", client_info, cid
@@ -61,11 +149,16 @@ module NATSD #:nodoc: all
       end
       @auth_pending = EM.add_timer(NATSD::Server.auth_timeout) { connect_auth_timeout } if Server.auth_required?
       @ping_timer = EM.add_periodic_timer(NATSD::Server.ping_interval) { send_ping }
+      # pingメッセージを送る度に１ずつインクリメントされる。
+      # PONGを受信する度に１ずつデクリメントする。
+      # Server.ping_maxを越えた場合、そのクライアントコネクションは削除される。
       @pings_outstanding = 0
       Server.num_connections += 1
       return if max_connections_exceeded?
     end
 
+    # クライアントにpingメッセージを送信する。
+    # メッセージ送信後、@pings_outstandingを１インクリメントする。
     def send_ping
       return if @closing
       if @pings_outstanding > NATSD::Server.ping_max
@@ -188,6 +281,7 @@ module NATSD #:nodoc: all
       end
     end
 
+    # INFO メッセージを送信する。
     def send_info
       queue_data("INFO #{Server.info_string}#{CR_LF}")
     end
