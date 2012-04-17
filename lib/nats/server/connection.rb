@@ -1,15 +1,25 @@
 # @cid:
 #    ・クライアントコネクションが作成される毎に割り当てられる1から始まる番号。
 #    ・作成される度にServer#cidで１ずつインクリメントされた値をセット。
+#
 # @subscriptions Hash:
 #    ・キーはsidでSubscriberインスタンスを保持。
+#
 # @in_msgs:
+#    ・Natsサーバがこのコネクションで受信したメッセージ総数
+#    ・クライアントがpublishしたメッセージ総数と同等
 #
 # @out_msgs:
+#    ・Natsサーバがこのコネクションに送信したメッセージ総数
+#    ・クライアントがsubscribeしたメッセージ総数と同等
 #
 # @in_bytes:
+#    ・Natsサーバがこのコネクションで受信したデータサイズの総量(byte)
+#    ・クライアントがpublishしたデータサイズと同等
 #
 # @out_bytes:
+#    ・Natsサーバがこのコネクションで送信したデータサイズの総量(byte)
+#    ・クライアントがsubscribeしたデータサイズと同等
 #
 # @writev Array:
 #    ・一時的に送信データを格納する変数。
@@ -37,6 +47,14 @@
 #      コネクション削除時、クライアント側にUNRESPONSIVEの通知あり。
 #            ./lib/nats/server/const.rb:  UNRESPONSIVE        = "-ERR 'Unresponsive client detected, connection dropped'#{CR_LF}".freeze
 #
+# @client_info:
+#
+# @msg_sub:
+#    ・Subjectとなる文字列
+#
+# @msg_reply:
+#    ・Replyとなる文字列? TODO:
+#
 # INFOメッセージ:
 #    ・"INFO #{Server.info_string}#{CR_LF}"
 #        Server#info_stringは@infoをJSONに変換するメソッド
@@ -50,7 +68,6 @@
 #          :ssl_required => ssl_required?,
 #          :max_payload => @max_payload
 #        }
-
 module NATSD #:nodoc: all
 
   module Connection #:nodoc: all
@@ -180,7 +197,25 @@ module NATSD #:nodoc: all
       debug "Connection timeout due to lack of TLS/SSL negotiations", cid
     end
 
+    # データ受信時に呼び出されるメソッド。
+    # EventMachine::Connection#receive_data
+    #
+    # Natsプロトコル:
+    #    （コントロール) + メッセージ + \n\r
+    #  (nats/server/const.rb)
+    #
+    # コネクションはコネクション毎にステート(@parse_state)を保持しており、以下の状態が存在する。
+    #    AWAITING_CONTROL_LINE :
+    #        ・次に受信するデータにコントロールラインを期待している状態
+    #          (nats/server/const.rb)参照
+    #        ・受信したデータがNatsプロトコルとして意味のあるメッセージになるまではこのステート
+    #    AWAITING_MSG_PAYLOAD :  
+    #        ・Natsメッセージの送信する準備ができた状態
+    #        ・メッセージをsubscriberに送信する
     def receive_data(data)
+      # 受信したデータを@bufに格納していく。
+      # すでに受信しているデータがある場合(@bufが存在する場合)は、連続したメッセージとして、
+      # 受信したデータを末尾に追加する。
       @buf = @buf ? @buf << data : data
       return close_connection if @buf =~ /(\006|\004)/ # ctrl+c or ctrl+d for telnet friendly
 
@@ -190,8 +225,12 @@ module NATSD #:nodoc: all
         when AWAITING_CONTROL_LINE
           case @buf
           when PUB_OP
+            # $&は、現在のスコープで最後に成功した正規表現のパターンマッチでマッチした文字列です。
+            # 最後のマッチが失敗していた場合には nil となります。 
             ctrace('PUB OP', strip_op($&)) if NATSD::Server.trace_flag?
             return connect_auth_timeout if @auth_pending
+            # $'は、現在のスコープで最後に成功した正規表現のパターンマッチでマッチした部分より後ろの文字列です。
+            # 最後のマッチが失敗していた場合には nil となります。 
             @buf = $'
             @parse_state = AWAITING_MSG_PAYLOAD
             @msg_sub, @msg_reply, @msg_size = $1, $3, $4.to_i

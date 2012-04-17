@@ -113,7 +113,8 @@ module NATSD #:nodoc: all
         File.open(@options[:pid_file], 'w') { |f| f.puts "#{Process.pid}" } if @options[:pid_file]
       end
 
-      # 
+      # subscribeオペレーション受信時に呼び出される。
+      # @sublistにsubjectおよびSubscriberのインスタンスを格納する。
       def subscribe(sub)
         @sublist.insert(sub.subject, sub)
       end
@@ -122,6 +123,11 @@ module NATSD #:nodoc: all
         @sublist.remove(sub.subject, sub)
       end
 
+      # subscriberにNatsメッセージを送信する。
+      #
+      # 送信するコネクションの送信バッファサイズが既定値を越える場合、
+      # SLOW CONSUMERと判断し、クライアントにエラーメッセージを送信後、
+      # コネクションを破棄する。
       def deliver_to_subscriber(sub, subject, reply, msg)
         conn = sub.conn
 
@@ -148,6 +154,10 @@ module NATSD #:nodoc: all
         end
       end
 
+      # subscriberにNatsメッセージを送信する。
+      #
+      # sublistの中から、subjectをsubscribeしているsubscriberを検索。
+      # queue groupの場合、subscriberの中からランダムで１つのsubscriberにNatsメッセージを送信する。
       def route_to_subscribers(subject, reply, msg)
         qsubs = nil
 
@@ -200,6 +210,10 @@ module NATSD #:nodoc: all
         @info.to_json
       end
 
+      # HTTP Monitorを起動する。
+      #
+      # HTTP Monitorはthinサーバで起動する。
+      # 
       # Monitoring
       def start_http_server
         return unless port = @options[:http_port]

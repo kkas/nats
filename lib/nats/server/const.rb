@@ -12,6 +12,19 @@ module NATSD #:nodoc:
   AWAITING_MSG_PAYLOAD  = 2
 
   # Ops - See protocol.txt for more info
+  # 正規表現メモ：
+  #  \A : 文字列先頭。^ とは異なり改行の有無には影響しません。
+  #  \s : 空白文字。[ \t\n\r\f] と同じ 
+  #  \S : 非空白文字。[ \t\n\r\f] 以外の一文字。 
+  #  \r : キャリッジリターン(0x0d)
+  #  \d : digit, same as[0-9]
+  #  \n : new line
+  #   * : 直前の表現の 0 回以上の繰り返し。できるだけ長くマッチしようとする。
+  #   + : 量指定子(quantifiers)。直前の表現の 1 回以上の繰り返し
+  #   ? : 量指定子(quantifiers)。直前の正規表現の 0 または 1 回の繰り返し。
+  #  [] : 正規表現 [ ] は、文字クラス指定です。[] 内に列挙したいずれかの一文字にマッチします。
+  #          ^ : 指定した文字以外の一文字とマッチ
+  #  //i : case insensitive。 正規表現オプションの一つ。
   INFO     = /\AINFO\s*\r\n/i
   PUB_OP   = /\APUB\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n/i
   SUB_OP   = /\ASUB\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?([^\s]+)\r\n/i
